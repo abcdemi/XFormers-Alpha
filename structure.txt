@@ -1,0 +1,48 @@
+XFormers-Alpha/
+├─ README.md
+├─ LICENSE (MIT)
+├─ CITATION.cff
+├─ environment.yml  # conda; pins torch, lightning, numpy, pandas, ta, optuna, shap
+├─ pyproject.toml or setup.cfg
+├─ xformers_alpha/
+│  ├─ __init__.py
+│  ├─ data/
+│  │  ├─ loaders.py        # yfinance/CSV loaders, schema checks
+│  │  ├─ features.py       # technicals, returns, regimes (no leakage)
+│  │  └─ labeling.py       # horizon labels, classification/regression
+│  ├─ utils/
+│  │  ├─ cfg.py            # OmegaConf/YAML config handler
+│  │  ├─ seed.py           # all seeds, cudnn settings
+│  │  ├─ metrics.py        # IC, RankIC, Sharpe, etc.
+│  │  ├─ plotting.py       # matplotlib helpers
+│  │  └─ cv.py             # purged k-fold / walk-forward splitters
+│  ├─ models/
+│  │  ├─ baselines.py      # linear, tree, LSTM
+│  │  ├─ tft.py            # Temporal Fusion Transformer
+│  │  ├─ patchtst.py       # PatchTST
+│  │  ├─ informer.py       # Informer/TST variant
+│  │  └─ heads.py          # regression/classification/IC heads
+│  ├─ train.py             # train/val loop, logging, early stopping
+│  ├─ infer.py             # generate scores for backtest
+│  └─ backtest/
+│     ├─ engine.py         # vectorized backtester with costs/latency
+│     ├─ portfolio_cs.py   # cross-sectional allocator
+│     └─ portfolio_sa.py   # single-asset signal mapping
+├─ configs/
+│  ├─ cs_daily_patchtst.yaml
+│  ├─ cs_daily_tft.yaml
+│  ├─ sa_intraday_informer.yaml
+│  └─ baselines.yaml
+├─ notebooks/
+│  ├─ 01_data_explore.ipynb
+│  ├─ 02_feature_checks.ipynb
+│  ├─ 03_model_compare.ipynb
+│  └─ 04_backtest_report.ipynb
+├─ reports/
+│  ├─ figures/             # auto-saved plots
+│  └─ artifacts/           # trained weights, configs, metrics.json
+├─ tests/
+│  ├─ test_leakage.py      # unit tests for splits & alignment
+│  ├─ test_backtest.py     # pnl under zero-cost sanity
+│  └─ test_models.py
+└─ .github/workflows/ci.yml  # run pytest, flake8/ruff, black
