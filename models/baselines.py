@@ -14,6 +14,7 @@ import lightgbm as lgb
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import MinMaxScaler
 from typing import List
+import re
 
 # --- PyTorch specific imports ---
 import torch
