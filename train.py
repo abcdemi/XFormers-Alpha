@@ -1,71 +1,50 @@
-# In your notebook: 01_data_explore.ipynb
+# In your notebook (e.g., 01_data_explore.ipynb)
 
 # 1. --- IMPORTS AND DATA LOADING ---
 import pandas as pd
+import matplotlib.pyplot as plt
 from xformers_alpha.data.loaders import load_yfinance
-from models.baselines import LinearBaseline, TreeBaseline, LSTMBaseline, create_lagged_features
+from models.baselines import LinearBaseline, TreeBaseline, LSTMBaseline
 
-# Load data for a single stock
+# Load the full dataset
 try:
-    data_df = load_yfinance('GOOGL', start='2020-01-01', end='2023-12-31')
+    full_df = load_yfinance('GOOGL', start='2020-01-01', end='2023-12-31')
     print("Data loaded successfully.")
 except Exception as e:
     print(f"Error loading data: {e}")
 
-# 2. --- SPLIT DATA INTO TRAINING AND TESTING SETS ---
-# We will use the first 80% of the data for training and the last 20% for testing.
-split_index = int(len(data_df) * 0.8)
-train_df = data_df.iloc[:split_index]
-test_df = data_df.iloc[split_index:]
+# 2. --- RUN THE NEW BASELINE MODELS ---
 
-print(f"Training data shape: {train_df.shape}")
-print(f"Testing data shape:  {test_df.shape}")
+# -- Linear Model (now uses technical features) --
+linear_model = LinearBaseline()
+linear_predictions, linear_y_test = linear_model.train_and_evaluate(full_df, test_size=0.2)
 
+# -- Tree Model (now uses technical features) --
+tree_model = TreeBaseline(n_estimators=100)
+tree_predictions, tree_y_test = tree_model.train_and_evaluate(full_df, test_size=0.2)
 
-# 3. --- RUN THE BASELINE MODELS ---
-
-# --- Linear Baseline ---
-linear_model = LinearBaseline(lags=10)
-linear_model.fit(train_df)
-# Note: The predict function will internally create lags, so the output
-# will be shorter than the input test_df. We need to align them.
-linear_predictions = linear_model.predict(test_df)
-# The actual values corresponding to the predictions
-y_test_linear = create_lagged_features(test_df, lags=10)['close'].values
-print(f"Linear predictions generated. Shape: {linear_predictions.shape}")
-
-
-# --- Tree Baseline (LightGBM) ---
-#tree_model = TreeBaseline(lags=10, n_estimators=100)
-#tree_model.fit(train_df)
-#tree_predictions = tree_model.predict(test_df)
-#y_test_tree = create_lagged_features(test_df, lags=10)['close'].values
-#print(f"Tree predictions generated. Shape: {tree_predictions.shape}")
-
-
-# --- LSTM Baseline ---
-# Note: LSTMs can take a moment to train.
+# -- LSTM Model (now uses multivariate input) --
 lstm_model = LSTMBaseline(sequence_len=15, epochs=25)
-lstm_model.fit(train_df)
-lstm_predictions = lstm_model.predict(test_df)
-# The actual values for LSTM start after the first sequence_len period
-y_test_lstm = test_df['close'].values[lstm_model.sequence_len:]
-print(f"LSTM predictions generated. Shape: {lstm_predictions.shape}")
+lstm_predictions, lstm_y_test = lstm_model.train_and_evaluate(full_df, test_size=0.2)
 
+# 3. --- VISUALIZE PREDICTIONS ---
+# This part requires careful alignment of timestamps, as the feature engineering
+# changes the length of the dataframes.
 
-# 4. --- VISUALIZE PREDICTIONS (Example for one model) ---
-import matplotlib.pyplot as plt
+# The ground truth for Linear/Tree is the same length
+test_start_index_tree = len(full_df) - len(tree_y_test)
+timestamps_tree = full_df['timestamp'].iloc[test_start_index_tree:]
 
-# Let's visualize the LSTM model's predictions
-plt.style.use('seaborn-v0_8-darkgrid')
-fig, ax = plt.subplots(figsize=(14, 7))
+# LSTM alignment is different
+test_start_index_lstm = len(full_df) - len(lstm_y_test)
+timestamps_lstm = full_df['timestamp'].iloc[test_start_index_lstm:]
 
-ax.plot(test_df['timestamp'].iloc[-len(y_test_lstm):], y_test_lstm, label='Actual Prices', color='blue')
-ax.plot(test_df['timestamp'].iloc[-len(y_test_lstm):], lstm_predictions, label='Predicted Prices (LSTM)', color='orange', linestyle='--')
-ax.plot(test_df['timestamp'].iloc[-len(y_test_linear):], linear_predictions, label='Predicted Prices (Linear)', color='green', linestyle='-.')
-
-ax.set_title('Google (GOOGL) Price Prediction - Baselines', fontsize=16)
-ax.set_xlabel('Date', fontsize=12)
-ax.set_ylabel('Price (USD)', fontsize=12)
+# Plotting
+fig, ax = plt.subplots(figsize=(15, 8))
+ax.plot(timestamps_tree, tree_y_test, label='Actual Prices', color='blue', linewidth=2)
+ax.plot(timestamps_tree, linear_predictions, label='Predicted (Linear)', color='green', linestyle=':')
+ax.plot(timestamps_tree, tree_predictions, label='Predicted (Tree)', color='orange', linestyle='--')
+ax.plot(timestamps_lstm, lstm_predictions, label='Predicted (LSTM)', color='red', linestyle='-.')
+ax.set_title('GOOGL Price Prediction (Advanced Features)', fontsize=16)
 ax.legend()
 plt.show()
