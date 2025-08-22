@@ -1,4 +1,4 @@
-# xformers_alpha/baselines.py
+# models/baselines.py
 """
 Baseline forecasting models using technical indicators and multivariate inputs.
 - Linear/Tree models use technical analysis features instead of simple lags.
