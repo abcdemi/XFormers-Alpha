@@ -1,56 +1,73 @@
 # train_tft.py
 """
-A clean, from-scratch training script for the Temporal Fusion Transformer model.
+A clean, from-scratch training script dedicated to the Temporal Fusion Transformer.
 """
 
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Import the necessary functions from your project
-from xformers_alpha.data.loaders import load_yfinance
+# Import the necessary modules from your project
+# NOTE: Ensure you have a working loaders.py file as created previously.
+from xformers_alpha.data.loaders import load_yfinance 
 from models.tft import TFTModel
+
+# --- Configuration Block ---
+# All major parameters are defined here for easy modification.
+CONFIG = {
+    "ticker": "GOOGL",
+    "start_date": "2020-01-01",
+    "end_date": "2023-12-31",
+    "test_size": 0.2,
+    "encoder_length": 60, # How many past days the model sees (lookback window)
+    "forecast_horizon": 1,   # How many days to predict into the future
+    "hidden_size": 16,     # Model complexity
+}
+
+def get_aligned_timestamps(full_df, y_test, test_size, lookback_period):
+    """A helper function to get the correct timestamps for plotting."""
+    split_idx = int(len(full_df) * (1 - test_size))
+    # The first prediction corresponds to the day after the first validation encoder sequence
+    first_pred_idx = split_idx + lookback_period
+    # Ensure we don't select more timestamps than we have predictions
+    end_idx = first_pred_idx + len(y_test)
+    return full_df['timestamp'].iloc[first_pred_idx:end_idx]
 
 def main():
     """Main function to run the training and visualization pipeline."""
     
     # --- 1. Load Data ---
-    print("Loading data...")
+    print(f"Loading data for {CONFIG['ticker']}...")
     try:
-        full_df = load_yfinance('GOOGL', start='2020-01-01', end='2023-12-31')
+        full_df = load_yfinance(
+            ticker=CONFIG["ticker"], 
+            start=CONFIG["start_date"], 
+            end=CONFIG["end_date"]
+        )
         print(f"Data loaded successfully. Shape: {full_df.shape}")
     except Exception as e:
-        print(f"Error loading data: {e}")
+        print(f"ERROR: Failed to load data. {e}")
         return
 
     # --- 2. Initialize and Run the TFT Model ---
-    # The TFTModel class handles all the complex parts internally.
     tft_model = TFTModel(
-        encoder_length=60, 
-        forecast_horizon=1, 
-        hidden_size=16
+        encoder_length=CONFIG["encoder_length"], 
+        forecast_horizon=CONFIG["forecast_horizon"], 
+        hidden_size=CONFIG["hidden_size"]
     )
-    predictions, y_test = tft_model.train_and_evaluate(full_df, test_size=0.2)
+    predictions, y_test = tft_model.train_and_evaluate(full_df, test_size=CONFIG["test_size"])
     print("\nPrediction and evaluation complete.")
 
     # --- 3. Visualize Predictions ---
     print("Visualizing results...")
-    
-    # To plot correctly, we need the timestamps that correspond to our test set.
-    # The first prediction is for the day after the first validation encoder sequence ends.
-    test_size = 0.2
-    split_idx = int(len(full_df) * (1 - test_size))
-    first_prediction_day_index = split_idx + tft_model.encoder_length
-    
-    # Ensure we don't select more timestamps than we have predictions
-    end_index = first_prediction_day_index + len(y_test)
-    timestamps_test = full_df['timestamp'].iloc[first_prediction_day_index:end_index]
+    timestamps = get_aligned_timestamps(
+        full_df, y_test, CONFIG["test_size"], CONFIG["encoder_length"]
+    )
 
-    # Plotting
+    plt.style.use('seaborn-v0_8-darkgrid')
     fig, ax = plt.subplots(figsize=(15, 8))
-    ax.plot(timestamps_test, y_test, label='Actual Prices', color='blue', linewidth=2)
-    ax.plot(timestamps_test, predictions, label='Predicted (TFT)', color='red', linestyle='--')
-
-    ax.set_title('GOOGL Price Prediction: Temporal Fusion Transformer', fontsize=16)
+    ax.plot(timestamps, y_test, label='Actual Prices', color='blue', linewidth=2)
+    ax.plot(timestamps, predictions, label='Predicted (TFT)', color='red', linestyle='--')
+    ax.set_title(f"{CONFIG['ticker']} Price Prediction: Temporal Fusion Transformer", fontsize=16)
     ax.set_xlabel('Date', fontsize=12)
     ax.set_ylabel('Price (USD)', fontsize=12)
     ax.legend()
