@@ -1,9 +1,9 @@
-# xformers_alpha/tft.py
+# xformers_alpha/models/tft.py
 """
 A robust, from-scratch implementation of the Temporal Fusion Transformer (TFT).
 
-This version prioritizes clarity and explicit data preparation to ensure
-compatibility with the pytorch-forecasting library and prevent common errors.
+This file defines the self-contained TFTModel class, which encapsulates all
+the logic for data preparation, training, and prediction for the TFT.
 """
 
 import pandas as pd
@@ -11,7 +11,6 @@ import numpy as np
 import warnings
 warnings.filterwarnings("ignore") # Suppress common pytorch-lightning warnings
 
-import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping
 
@@ -28,33 +27,30 @@ class TFTModel:
         self.hidden_size = hidden_size
         self.lr = learning_rate
 
-    def _prepare_data_for_tft(self, raw_df: pd.DataFrame):
+    def _prepare_data_for_tft(self, df: pd.DataFrame):
         """
-        This is the core data preparation function.
-        It creates a new, perfectly structured DataFrame using a robust,
-        step-by-step method that is immune to common pandas errors.
+        Prepares a DataFrame for the TFT using a robust, step-by-step method.
+        This is the most critical step for preventing library errors.
         """
         print("Preparing data for TFT...")
-        # --- Start with a fresh copy of the raw data ---
-        df = raw_df.copy()
+        # Start with a fresh copy to avoid modifying the original DataFrame
+        data = df.copy()
         
         # --- Add mandatory and time-based columns one by one ---
         # This explicit method is safer than using a dictionary constructor.
-        df['time_idx'] = np.arange(len(df))
-        df['group_id'] = "stock_0" # Assigning a scalar is safe and broadcasts to all rows.
-        df['month'] = df['timestamp'].dt.month
-        df['day_of_week'] = df['timestamp'].dt.dayofweek
+        data['time_idx'] = np.arange(len(data))
+        data['group_id'] = "stock_0" # A single, consistent group ID is required.
+        data['month'] = data['timestamp'].dt.month
+        data['day_of_week'] = data['timestamp'].dt.dayofweek
         
         # --- Enforce strict data types for every column ---
-        # This is the most critical step to prevent library errors.
-        df["group_id"] = df["group_id"].astype("category")
-        df["month"] = df["month"].astype("category")
-        df["day_of_week"] = df["day_of_week"].astype("category")
-        
         for col in ["open", "high", "low", "close", "volume"]:
-            df[col] = df[col].astype(np.float32)
-
-        return df
+            data[col] = data[col].astype(np.float32)
+            
+        for col in ["group_id", "month", "day_of_week"]:
+            data[col] = data[col].astype("category")
+            
+        return data
 
     def train_and_evaluate(self, df: pd.DataFrame, test_size: float = 0.2):
         """
@@ -67,8 +63,7 @@ class TFTModel:
 
         # 2. Perform a chronological train/validation split
         split_idx = int(len(data) * (1 - test_size))
-        train_data = data.iloc[:split_idx]
-        val_data = data.iloc[split_idx:]
+        train_data, val_data = data.iloc[:split_idx], data.iloc[split_idx:]
         print(f"Training on {len(train_data)} samples, validating on {len(val_data)} samples.")
 
         # 3. Create the TimeSeriesDataSet object
@@ -88,31 +83,24 @@ class TFTModel:
             # The library automatically uses the target as an input for the encoder.
             time_varying_unknown_reals=["open", "high", "low", "volume"],
         )
-
+        
         # 4. Create validation set and dataloaders
-        validation_dataset = TimeSeriesDataSet.from_dataset(dataset, val_data, predict=True, stop_randomization=True)
+        val_dataset = TimeSeriesDataSet.from_dataset(dataset, val_data, predict=True, stop_randomization=True)
         train_loader = dataset.to_dataloader(train=True, batch_size=64, num_workers=0)
-        val_loader = validation_dataset.to_dataloader(train=False, batch_size=128, num_workers=0)
+        val_loader = val_dataset.to_dataloader(train=False, batch_size=128, num_workers=0)
 
         # 5. Configure the PyTorch Lightning Trainer
-        early_stop_callback = EarlyStopping(monitor="val_loss", min_delta=1e-4, patience=5, verbose=False, mode="min")
         trainer = pl.Trainer(
-            max_epochs=30,
-            accelerator="auto", # Automatically uses GPU if available
-            gradient_clip_val=0.1,
+            max_epochs=30, accelerator="auto", gradient_clip_val=0.1,
             limit_train_batches=30, # For quick runs; remove for full training
-            callbacks=[early_stop_callback],
-            logger=False, # Disables creation of log files
+            callbacks=[EarlyStopping(monitor="val_loss", patience=5, mode="min")],
+            logger=False, enable_checkpointing=True,
         )
 
         # 6. Configure and create the TFT model
         tft = TemporalFusionTransformer.from_dataset(
-            dataset,
-            learning_rate=self.lr,
-            hidden_size=self.hidden_size,
-            attention_head_size=1,
-            dropout=0.1,
-            hidden_continuous_size=8,
+            dataset, learning_rate=self.lr, hidden_size=self.hidden_size,
+            attention_head_size=1, dropout=0.1, hidden_continuous_size=8,
             output_size=7, # The model predicts 7 quantiles for the target
             loss=QuantileLoss(),
         )
@@ -125,16 +113,11 @@ class TFTModel:
 
         # 8. Load the best model from the checkpoint and predict
         print("Loading best model and making predictions...")
-        best_model_path = trainer.checkpoint_callback.best_model_path
-        best_tft = TemporalFusionTransformer.load_from_checkpoint(best_model_path)
+        best_model = TemporalFusionTransformer.load_from_checkpoint(trainer.checkpoint_callback.best_model_path)
+        raw_preds, x = best_model.predict(val_loader, return_x=True)
         
-        raw_predictions, x = best_tft.predict(val_loader, return_x=True)
-        
-        # The prediction tensor has shape (n_samples, forecast_horizon, n_quantiles)
-        # We want the median prediction (p50), which is at index 3 of the 7 quantiles.
-        predictions = raw_predictions[:, 0, 3].numpy()
-        
-        # The ground truth is in the 'decoder_target' part of the model input `x`.
+        # Extract the median prediction (quantile 0.5, which is index 3 of 7)
+        predictions = raw_preds[:, 0, 3].numpy()
         y_test = x["decoder_target"].squeeze().numpy()
-
+        
         return predictions, y_test
