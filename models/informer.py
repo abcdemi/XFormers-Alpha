@@ -1,109 +1,150 @@
+# === Minimal Informer for Stock Forecasting ===
+# Requirements: pip install yfinance torch matplotlib pandas numpy
+
 import yfinance as yf
 import numpy as np
 import pandas as pd
-import torch
-from torch.utils.data import DataLoader, TensorDataset
-from transformers import TimeSeriesTransformerConfig, TimeSeriesTransformerForPrediction
 import matplotlib.pyplot as plt
+import torch
+import torch.nn as nn
+import torch.optim as optim
 
-# @title Stock Market Prediction with Informer Model
+# -----------------------------
+# 1) Load stock data
+# -----------------------------
+ticker = "GOOGL"
+df = yf.download(ticker, period="5y", interval="1d", auto_adjust=True)
+series = df["Close"].dropna().values
 
-# @markdown ### Enter Stock Ticker and Date Range
-stock_ticker = "GOOGL"  # @param {type:"string"}
-start_date = "2020-01-01"  # @param {type:"date"}
-end_date = "2025-01-01"  # @param {type:"date"}
+# Normalize
+mean, std = series.mean(), series.std()
+series_norm = (series - mean) / std
 
-# @markdown ### Model and Training Parameters
-prediction_length = 20 # @param {type:"integer"}
-context_length = 60  # @param {type:"integer"}
-num_epochs = 10 # @param {type:"integer"}
-batch_size = 32 # @param {type:"integer"}
+# -----------------------------
+# 2) Create sliding windows
+# -----------------------------
+def make_windows(data, input_len=128, horizon=30):
+    X, Y = [], []
+    for i in range(len(data) - input_len - horizon):
+        X.append(data[i : i + input_len])
+        Y.append(data[i + input_len : i + input_len + horizon])
+    return np.array(X), np.array(Y)
 
-# Download data
-data = yf.download(stock_ticker, start=start_date, end=end_date)
-prices = data['Close'].values
+input_len, horizon = 128, 30
+X, Y = make_windows(series_norm, input_len, horizon)
 
-# Normalize data
-min_price = np.min(prices)
-max_price = np.max(prices)
-scaled_prices = (prices - min_price) / (max_price - min_price)
+split = int(0.8 * len(X))
+X_train, Y_train = X[:split], Y[:split]
+X_test, Y_test = X[split:], Y[split:]
 
-# Create sequences
-def create_sequences(data, context_length, prediction_length):
-    sequences = []
-    labels = []
-    for i in range(len(data) - context_length - prediction_length + 1):
-        sequences.append(data[i:i+context_length])
-        labels.append(data[i+context_length:i+context_length+prediction_length])
-    return np.array(sequences), np.array(labels)
+X_train = torch.tensor(X_train, dtype=torch.float32).unsqueeze(-1)
+Y_train = torch.tensor(Y_train, dtype=torch.float32).unsqueeze(-1)
+X_test  = torch.tensor(X_test, dtype=torch.float32).unsqueeze(-1)
+Y_test  = torch.tensor(Y_test, dtype=torch.float32).unsqueeze(-1)
 
-X, y = create_sequences(scaled_prices, context_length, prediction_length)
+# -----------------------------
+# 3) Positional Encoding
+# -----------------------------
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super().__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-np.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer("pe", pe)
 
-# Split data
-train_size = int(len(X) * 0.8)
-X_train, X_test = X[:train_size], X[train_size:]
-y_train, y_test = y[:train_size], y[train_size:]
+    def forward(self, x):
+        return x + self.pe[:, :x.size(1)]
 
-# Create PyTorch DataLoaders
-train_dataset = TensorDataset(torch.from_numpy(X_train).float().unsqueeze(-1), torch.from_numpy(y_train).float().unsqueeze(-1))
-test_dataset = TensorDataset(torch.from_numpy(X_test).float().unsqueeze(-1), torch.from_numpy(y_test).float().unsqueeze(-1))
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=batch_size)
+# -----------------------------
+# 4) Simplified Informer (Transformer Encoder-Decoder)
+# -----------------------------
+class Informer(nn.Module):
+    def __init__(self, input_dim=1, d_model=64, nhead=4, num_encoder_layers=2, num_decoder_layers=1, horizon=30):
+        super().__init__()
+        self.d_model = d_model
+        self.horizon = horizon
 
-# Configure and instantiate the model
-config = TimeSeriesTransformerConfig(
-    prediction_length=prediction_length,
-    context_length=context_length,
-    input_size=1,
-    num_time_features=0,
-    num_static_categorical_features=0,
-    feature_size=10,
-    encoder_layers=2,
-    decoder_layers=2,
-    d_model=32,
-)
-model = TimeSeriesTransformerForPrediction(config)
+        self.input_proj = nn.Linear(input_dim, d_model)
+        self.pos_enc = PositionalEncoding(d_model)
 
-# Define optimizer
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        self.encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=128, dropout=0.1, batch_first=True),
+            num_layers=num_encoder_layers,
+        )
 
-# Training loop
-model.train()
-for epoch in range(num_epochs):
-    for batch in train_loader:
+        self.decoder = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=128, dropout=0.1, batch_first=True),
+            num_layers=num_decoder_layers,
+        )
+
+        self.fc_out = nn.Linear(d_model, 1)
+
+    def forward(self, x):
+        # x: [B, input_len, 1]
+        x = self.input_proj(x) * np.sqrt(self.d_model)
+        x = self.pos_enc(x)
+        memory = self.encoder(x)
+
+        # decoder input = zeros (teacher forcing can be added)
+        dec_in = torch.zeros(x.size(0), self.horizon, self.d_model, device=x.device)
+        dec_in = self.pos_enc(dec_in)
+
+        out = self.decoder(dec_in, memory)
+        out = self.fc_out(out)
+        return out  # [B, horizon, 1]
+
+# -----------------------------
+# 5) Train
+# -----------------------------
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = Informer(horizon=horizon).to(device)
+optimizer = optim.Adam(model.parameters(), lr=1e-3)
+criterion = nn.MSELoss()
+
+epochs = 10
+batch_size = 32
+
+for epoch in range(1, epochs + 1):
+    model.train()
+    perm = torch.randperm(len(X_train))
+    total_loss = 0
+
+    for i in range(0, len(X_train), batch_size):
+        idx = perm[i : i + batch_size]
+        xb, yb = X_train[idx].to(device), Y_train[idx].to(device)
+
         optimizer.zero_grad()
-        past_values = batch[0]
-        future_values = batch[1]
-        outputs = model(past_values=past_values, future_values=future_values)
-        loss = outputs.loss
+        preds = model(xb)
+        loss = criterion(preds, yb)
         loss.backward()
         optimizer.step()
-    print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {loss.item()}")
+        total_loss += loss.item() * xb.size(0)
 
-# Generate predictions
+    print(f"Epoch {epoch}, Train MSE: {total_loss / len(X_train):.6f}")
+
+# -----------------------------
+# 6) Forecast on test set
+# -----------------------------
 model.eval()
-predictions = []
 with torch.no_grad():
-    for batch in test_loader:
-        past_values = batch[0]
-        outputs = model.generate(past_values=past_values)
-        predictions.extend(outputs.sequences.numpy())
+    preds = model(X_test.to(device)).cpu().numpy().squeeze(-1)
 
-# Inverse scale predictions and actuals
-predicted_prices_scaled = np.array([p[0] for p in predictions])
-predicted_prices = predicted_prices_scaled * (max_price - min_price) + min_price
-actual_prices_scaled = y_test[:, 0]
-actual_prices = actual_prices_scaled * (max_price - min_price) + min_price
-test_dates = data.index[train_size + context_length: train_size + context_length + len(actual_prices)]
+# take first test window for plotting
+pred = preds[0] * std + mean
+actual = Y_test[0].numpy().squeeze() * std + mean
+history = X_test[0].numpy().squeeze() * std + mean
 
-
-# Plot the results
-plt.figure(figsize=(14, 7))
-plt.plot(test_dates, actual_prices, label='Actual Prices', color='blue')
-plt.plot(test_dates, predicted_prices, label='Predicted Prices', color='red', linestyle='--')
-plt.title(f'{stock_ticker} Stock Price Prediction')
-plt.xlabel('Date')
-plt.ylabel('Price')
+# -----------------------------
+# 7) Plot
+# -----------------------------
+plt.figure(figsize=(12, 6))
+plt.plot(range(len(history)), history, label="History")
+plt.plot(range(len(history), len(history) + len(actual)), actual, label="Actual")
+plt.plot(range(len(history), len(history) + len(pred)), pred, label="Informer Forecast")
+plt.title("GOOGL Stock Price Forecast with Informer (Scratch PyTorch)")
 plt.legend()
-plt.grid(True)
 plt.show()
