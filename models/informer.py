@@ -1,5 +1,10 @@
-# === Working Informer-style Transformer for GOOGL (Corrected) ===
+# === Working Informer-style Transformer for GOOGL (Corrected for OMP Error) ===
 # Requirements: pip install yfinance torch matplotlib numpy pandas
+
+# This is a common environment issue, not a code bug.
+# It MUST be placed before importing numpy or torch.
+import os
+os.environ['KMP_DUPLICATE_LIB_OK']='True'
 
 import yfinance as yf
 import numpy as np
@@ -14,13 +19,7 @@ from torch.utils.data import TensorDataset, DataLoader
 # -----------------------------
 ticker = "GOOGL"
 df = yf.download(ticker, period="5y", interval="1d", auto_adjust=True)
-
-# --- START OF FIX ---
-# Ensure the 'close' array is strictly 1-dimensional.
-# The .squeeze() method removes any dimensions of size 1. This prevents a 2D array
-# of shape (N, 1) from being created, which is the root cause of the 4D tensor error later on.
 close = df["Close"].dropna().astype("float32").values.squeeze()
-# --- END OF FIX ---
 
 mean, std = close.mean(), close.std()
 series = (close - mean) / (std + 1e-8)
@@ -33,7 +32,6 @@ HORIZON = 30
 
 def make_windows(arr, input_len=INPUT_LEN, horizon=HORIZON):
     X, Y = [], []
-    # This loop correctly creates 2D arrays from a 1D input array
     for i in range(len(arr) - input_len - horizon):
         X.append(arr[i:i+input_len])
         Y.append(arr[i+input_len:i+input_len+horizon])
@@ -47,15 +45,14 @@ X_test, Y_test = X[split:], Y[split:]
 # -----------------------------
 # 3) Convert to tensors with correct shapes
 # X: [N, seq_len, 1], Y: [N, horizon, 1]
-# This step correctly adds the feature dimension for the model.
 # -----------------------------
 X_train = torch.from_numpy(X_train).float().unsqueeze(-1)
 Y_train = torch.from_numpy(Y_train).float().unsqueeze(-1)
 X_test  = torch.from_numpy(X_test).float().unsqueeze(-1)
 Y_test  = torch.from_numpy(Y_test).float().unsqueeze(-1)
 
-print("X_train shape:", X_train.shape)  # Should be [N, 128, 1]
-print("Y_train shape:", Y_train.shape)  # Should be [N, 30, 1]
+print("X_train shape:", X_train.shape)
+print("Y_train shape:", Y_train.shape)
 
 # -----------------------------
 # 4) DataLoader
@@ -110,8 +107,6 @@ class Informer(nn.Module):
         self.fc_out = nn.Linear(d_model, 1)
 
     def forward(self, x):
-        # x: [B, seq_len, 1]
-        # This assertion will now pass because the input batch 'xb' will be 3D.
         assert x.ndim == 3, f"Expected 3D input, got {x.ndim}D"
         x = self.input_proj(x) * (self.d_model ** 0.5)
         x = self.pos_enc(x)
@@ -124,7 +119,7 @@ class Informer(nn.Module):
 
         out = self.decoder(tgt=dec_in, memory=memory, tgt_mask=tgt_mask)
         out = self.fc_out(out)
-        return out  # [B, horizon, 1]
+        return out
 
 # -----------------------------
 # 8) Training
@@ -134,15 +129,14 @@ model = Informer().to(device)
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
 criterion = nn.MSELoss()
 
-EPOCHS = 10
+EPOCHS = 15
 for epoch in range(1, EPOCHS+1):
     model.train()
     total_loss = 0
     for xb, yb in train_dl:
-        # xb will now correctly be [B, 128, 1]
         xb, yb = xb.to(device), yb.to(device)
         optimizer.zero_grad()
-        preds = model(xb)  # [B, 30, 1]
+        preds = model(xb)
         loss = criterion(preds, yb)
         loss.backward()
         optimizer.step()
@@ -154,16 +148,14 @@ for epoch in range(1, EPOCHS+1):
 # -----------------------------
 model.eval()
 with torch.no_grad():
-    # Select a single sample from the test set to predict and plot
     test_sample_idx = 0
-    test_input = X_test[test_sample_idx].unsqueeze(0) # Add batch dimension for the model
+    test_input = X_test[test_sample_idx].unsqueeze(0)
     
     preds = model(test_input.to(device)).cpu().numpy().squeeze()
     
     actual = Y_test[test_sample_idx].numpy().squeeze()
     history = X_test[test_sample_idx].numpy().squeeze()
 
-# Inverse transform to get original stock prices
 pred_unscaled = preds * std + mean
 actual_unscaled = actual * std + mean
 history_unscaled = history * std + mean
