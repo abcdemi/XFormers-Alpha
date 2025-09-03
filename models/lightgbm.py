@@ -1,4 +1,4 @@
-# === Kaggle-Style Trading Strategy Simulation (Corrected for LightGBM Error) ===
+# === Kaggle-Style Trading Strategy Simulation (Corrected for TypeError in Evaluation) ===
 # Requirements: pip install yfinance lightgbm pandas numpy matplotlib scikit-learn
 
 # --- 1. Setup and Imports ---
@@ -9,12 +9,21 @@ import lightgbm as lgb
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-import re # Import the regular expression library
+import re
 
 # --- 2. Data Acquisition and Feature Engineering ---
 print("Step 2: Downloading data and engineering features...")
 ticker = "GOOGL"
 df = yf.download(ticker, period="10y", interval="1d", auto_adjust=True)
+
+# --- START OF FIX ---
+# yfinance can return columns as a MultiIndex. This flattens it to a simple index.
+# This is the most robust way to prevent downstream errors.
+if isinstance(df.columns, pd.MultiIndex):
+    df.columns = df.columns.droplevel(1) # Drop the 'Ticker' level, e.g. ('Close', 'GOOGL') -> 'Close'
+    print("Flattened MultiIndex columns to a simple index.")
+# --- END OF FIX ---
+
 
 def create_features(data):
     """Create time-series features from the price data."""
@@ -41,13 +50,8 @@ df_features = df_features.dropna()
 X = df_features.drop(['Open', 'High', 'Low', 'Close', 'Volume', 'target'], axis=1)
 y = df_features['target']
 
-# --- START OF FIX ---
 # Sanitize feature names for LightGBM compatibility.
-# This uses a regular expression to replace any character that is not a
-# letter, number, or underscore with an underscore.
 X.columns = [re.sub(r'[^a-zA-Z0-9_]', '_', col) for col in X.columns]
-print("Sanitized feature names.")
-# --- END OF FIX ---
 
 # Split into training and testing sets (80% train, 20% test)
 train_size = int(0.8 * len(X))
@@ -55,7 +59,7 @@ X_train, X_test = X[:train_size], X[train_size:]
 y_train, y_test = y[:train_size], y[train_size:]
 
 # --- 4. Model Training ---
-print("Step 4: Training the LightGBM model...")
+print("\nStep 4: Training the LightGBM model...")
 params = {
     'objective': 'binary',
     'metric': 'binary_logloss',
@@ -70,10 +74,8 @@ params = {
 }
 
 model = lgb.LGBMClassifier(**params)
-# The model will now train without the error.
 model.fit(X_train, y_train)
 
-# Check the accuracy on the test set
 preds = model.predict(X_test)
 accuracy = accuracy_score(y_test, preds)
 print(f"Model Accuracy on Test Set: {accuracy:.4f}")
@@ -83,10 +85,12 @@ print("\nStep 5: Running the backtesting simulation...")
 
 def run_backtest(predictions, test_data):
     initial_capital = 100000.0
-    portfolio_value = initial_capital
     portfolio_history = []
     daily_returns = test_data['Close'].pct_change().dropna()
     aligned_preds = predictions[:len(daily_returns)]
+    
+    # We start with capital and no position
+    portfolio_value = initial_capital
     
     for i in range(len(daily_returns)):
         signal = aligned_preds[i]
@@ -94,7 +98,7 @@ def run_backtest(predictions, test_data):
         
         if signal == 1:
             strategy_return = market_return
-        else: # signal == 0
+        else:
             strategy_return = 0.0
             
         portfolio_value *= (1 + strategy_return)
@@ -105,15 +109,22 @@ def run_backtest(predictions, test_data):
 portfolio_history = run_backtest(preds, df.loc[X_test.index])
 
 # --- 6. Evaluation and Visualization ---
-print("Step 6: Evaluating the strategy and plotting results...")
+print("\nStep 6: Evaluating the strategy and plotting results...")
 
 def evaluate_strategy(portfolio_history, test_data):
     total_return = (portfolio_history.iloc[-1] / portfolio_history.iloc[0]) - 1
     daily_strategy_returns = portfolio_history.pct_change().dropna()
-    sharpe_ratio = (daily_strategy_returns.mean() / daily_strategy_returns.std()) * np.sqrt(252)
+    
+    # Handle the case where std is zero (no trades or flat returns)
+    if daily_strategy_returns.std() == 0:
+        sharpe_ratio = 0.0
+    else:
+        sharpe_ratio = (daily_strategy_returns.mean() / daily_strategy_returns.std()) * np.sqrt(252)
+
     rolling_max = portfolio_history.cummax()
     daily_drawdown = portfolio_history / rolling_max - 1.0
     max_drawdown = daily_drawdown.min()
+    
     buy_hold_data = test_data['Close'].loc[portfolio_history.index]
     buy_hold_return = (buy_hold_data.iloc[-1] / buy_hold_data.iloc[0]) - 1
     
