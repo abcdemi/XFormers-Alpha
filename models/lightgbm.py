@@ -1,6 +1,6 @@
-# === Kaggle-Style Trading Strategy Simulation (v9: The Ultimate Experiment) ===
+# === Kaggle-Style Trading Strategy Simulation (v10: The Definitive Test) ===
 # This version combines our most robust model (V4) with a strategy logic
-# that is optimized for the best financial metric (Sharpe Ratio).
+# that is explicitly optimized for the best financial metric (Sharpe Ratio).
 # Requirements: pip install yfinance lightgbm pandas numpy matplotlib scikit-learn
 
 # --- 1. Setup and Imports ---
@@ -52,7 +52,6 @@ X_test, y_test = X[val_size:], y[val_size:]
 
 # --- 4. Training the Champion V4 Model ---
 print("\nStep 4: Training our robust V4 model...")
-# Using the proven, manually-selected hyperparameters from our champion model
 params_v4 = {
     'objective': 'binary', 'metric': 'binary_logloss', 'boosting_type': 'gbdt',
     'n_estimators': 250, 'learning_rate': 0.02, 'num_leaves': 60,
@@ -60,12 +59,12 @@ params_v4 = {
     'colsample_bytree': 0.7, 'subsample': 0.7
 }
 
-# We need two models: one for validation probabilities, one for final test probabilities
+# Train on the training set to get probabilities for the validation set
 model_for_val = lgb.LGBMClassifier(**params_v4)
 model_for_val.fit(X_train, y_train)
 probas_val = model_for_val.predict_proba(X_val)[:, 1]
 
-# The final model is trained on all available data (train + val)
+# Train the final model on all data before the test set
 X_train_full = pd.concat([X_train, X_val]); y_train_full = pd.concat([y_train, y_val])
 final_model = lgb.LGBMClassifier(**params_v4)
 final_model.fit(X_train_full, y_train_full)
@@ -74,7 +73,6 @@ probas_test = final_model.predict_proba(X_test)[:, 1]
 # --- 5. Optimize Strategy Thresholds for Sharpe Ratio ---
 print("\nStep 5: Optimizing strategy thresholds for Sharpe Ratio on the validation set...")
 def run_threshold_backtest(probabilities, test_data, threshold_low, threshold_high):
-    # ... [Backtest function modified to accept thresholds] ...
     initial_capital = 100000.0; portfolio_value = initial_capital; portfolio_history = []
     daily_returns = test_data['Close'].pct_change().dropna()
     aligned_probas = probabilities[:len(daily_returns)]
@@ -112,7 +110,6 @@ print("\nStep 6: Running final backtest on the unseen test set...")
 portfolio_history = run_threshold_backtest(probas_test, df.loc[X_test.index], best_thresholds[0], best_thresholds[1])
 
 def evaluate_strategy(portfolio_history, test_data):
-    # ... [Same evaluation function as before] ...
     total_return = (portfolio_history.iloc[-1] / portfolio_history.iloc[0]) - 1
     daily_strategy_returns = portfolio_history.pct_change().dropna()
     sharpe_ratio = (daily_strategy_returns.mean() / daily_strategy_returns.std()) * np.sqrt(252) if daily_strategy_returns.std() != 0 else 0.0
@@ -128,7 +125,7 @@ evaluate_strategy(portfolio_history, df)
 # --- 7. Visualization ---
 plt.style.use('seaborn-v0_8-whitegrid')
 plt.figure(figsize=(14, 7))
-plt.plot(portfolio_history, label='LGBM Strategy (V4 + Optimized Thresholds)', color='royalblue')
+plt.plot(portfolio_history, label='LGBM Strategy (V4 Model + Optimized Thresholds)', color='royalblue')
 buy_hold_equity = (df['Close'].loc[portfolio_history.index].pct_change().add(1).cumprod() * 100000)
 plt.plot(buy_hold_equity, label='Buy & Hold', color='gray', linestyle='--')
 plt.title(f"{ticker} Strategy vs. Buy & Hold", fontsize=16)
