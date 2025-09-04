@@ -1,128 +1,87 @@
+# data/features.py
 """
-loaders.py
-Data loaders for financial time series.
-
-Supports:
-- Yahoo Finance (via yfinance)
-- Local CSV files
-
-Includes schema validation and reproducible output.
+Functions for generating predictive features from raw financial data.
+Each function takes a DataFrame and returns it with new columns added.
 """
-
-import os
 import pandas as pd
-import yfinance as yf
-from typing import List, Optional
+import numpy as np
 
-# ------------------
-# Schema enforcement
-# ------------------
-EXPECTED_COLS = ["timestamp", "open", "high", "low", "close", "volume"]
+def add_price_features(df: pd.DataFrame, feature_list: list) -> pd.DataFrame:
+    """
+    Adds price-based technical indicators to the DataFrame.
 
+    Args:
+        df (pd.DataFrame): DataFrame with 'open', 'high', 'low', 'close' columns.
+        feature_list (list): A list of feature names to generate.
 
-def _check_schema(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure DataFrame has required columns and sorted timestamps."""
-    missing = [c for c in EXPECTED_COLS if c not in df.columns]
-    if missing:
-        raise ValueError(f"Missing required columns: {missing}")
+    Returns:
+        pd.DataFrame: DataFrame with new feature columns.
+    """
+    if 'logret_1' in feature_list:
+        df['logret_1'] = np.log(df['close'] / df['close'].shift(1))
+    if 'logret_5' in feature_list:
+        df['logret_5'] = np.log(df['close'] / df['close'].shift(5))
+    if 'rsi_14' in feature_list:
+        delta = df['close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        df['rsi_14'] = 100 - (100 / (1 + rs))
+    if 'sma_20' in feature_list:
+        df['sma_20'] = df['close'].rolling(20).mean()
+    if 'bb_pct' in feature_list:
+        sma_20 = df['close'].rolling(20).mean()
+        std_20 = df['close'].rolling(20).std()
+        bb_upper = sma_20 + (std_20 * 2)
+        bb_lower = sma_20 - (std_20 * 2)
+        df['bb_pct'] = (df['close'] - bb_lower) / (bb_upper - bb_lower)
+    
+    return df
 
-    # enforce types
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-    df = df.sort_values("timestamp").reset_index(drop=True)
+def add_volume_features(df: pd.DataFrame, feature_list: list) -> pd.DataFrame:
+    """
+    Adds volume-based technical indicators to the DataFrame.
+    """
+    if 'vol_scaled_20' in feature_list:
+        sma_vol_20 = df['volume'].rolling(20).mean()
+        df['vol_scaled_20'] = df['volume'] / sma_vol_20
+        
+    return df
+
+def add_calendar_features(df: pd.DataFrame, feature_list: list) -> pd.DataFrame:
+    """
+    Adds calendar-based features to the DataFrame.
+    """
+    if 'dow' in feature_list:
+        df['dow'] = df['timestamp'].dt.dayofweek
+    if 'month' in feature_list:
+        df['month'] = df['timestamp'].dt.month
+        
     return df
 
 
-# ------------------
-# CSV Loader
-# ------------------
-def load_csv(path: str) -> pd.DataFrame:
-    """Load OHLCV data from a CSV file and validate schema."""
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"CSV file not found: {path}")
-    df = pd.read_csv(path)
-    return _check_schema(df)
-
-
-# ------------------
-# Yahoo Finance Loader
-# ------------------
-def load_yfinance(
-    ticker: str,
-    start: Optional[str] = None,
-    end: Optional[str] = None,
-    interval: str = "1d",
-) -> pd.DataFrame:
+def generate_features(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     """
-    Download OHLCV data from Yahoo Finance.
+    Main function to orchestrate feature generation based on a config file.
 
     Args:
-        ticker (str): Ticker symbol, e.g. 'AAPL' or 'SPY'.
-        start (str, optional): Start date ("YYYY-MM-DD").
-        end (str, optional): End date ("YYYY-MM-DD").
-        interval (str): Data frequency, e.g. '1d', '1h', '1m'.
+        df (pd.DataFrame): Raw data with timestamp and OHLCV columns.
+        config (dict): The 'features' section of the YAML config.
 
     Returns:
-        pd.DataFrame with schema [timestamp, open, high, low, close, volume].
+        pd.DataFrame: DataFrame with all generated features.
     """
-    data = yf.download(ticker, start=start, end=end, interval=interval, progress=False)
-    if data.empty:
-        raise ValueError(f"No data returned for {ticker}.")
-
-    df = data.rename(
-        columns={
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Adj Close": "adj_close",
-            "Volume": "volume",
-        }
-    ).reset_index()
-
-    # Normalize timestamp column
-    if "Date" in df.columns:
-        df = df.rename(columns={"Date": "timestamp"})
-    elif "Datetime" in df.columns:
-        df = df.rename(columns={"Datetime": "timestamp"})
-
-    # Keep only required columns
-    df = df[["timestamp", "open", "high", "low", "close", "volume"]]
-    return _check_schema(df)
-
-
-# ------------------
-# Multi-asset loader
-# ------------------
-def load_universe(
-    tickers: List[str],
-    start: str,
-    end: str,
-    interval: str = "1d",
-    source: str = "yfinance",
-    data_dir: Optional[str] = None,
-) -> dict:
-    """
-    Load multiple assets as dict of DataFrames keyed by ticker.
-
-    Args:
-        tickers (List[str]): List of ticker symbols.
-        start, end (str): Date range.
-        interval (str): Frequency.
-        source (str): 'yfinance' or 'csv'.
-        data_dir (str, optional): Required if source='csv'.
-
-    Returns:
-        dict[str, pd.DataFrame]
-    """
-    results = {}
-    for t in tickers:
-        if source == "yfinance":
-            results[t] = load_yfinance(t, start, end, interval)
-        elif source == "csv":
-            if data_dir is None:
-                raise ValueError("data_dir must be provided for CSV source.")
-            path = os.path.join(data_dir, f"{t}.csv")
-            results[t] = load_csv(path)
-        else:
-            raise ValueError(f"Unknown source: {source}")
-    return results
+    df = df.copy()
+    
+    if 'price' in config:
+        df = add_price_features(df, config['price'])
+    if 'volume' in config:
+        df = add_volume_features(df, config['volume'])
+    if 'calendar' in config:
+        df = add_calendar_features(df, config['calendar'])
+        
+    # Drop rows with NaNs created by rolling windows/lags
+    df.dropna(inplace=True)
+    df.reset_index(drop=True, inplace=True)
+    
+    return df
