@@ -1,5 +1,3 @@
-# In your notebook (e.g., 01_data_explore.ipynb)
-
 # 1. --- IMPORTS AND DATA LOADING ---
 import pandas as pd
 import matplotlib.pyplot as plt
