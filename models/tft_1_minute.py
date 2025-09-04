@@ -8,7 +8,10 @@ import yfinance as yf
 
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
 from pytorch_forecasting.data import GroupNormalizer
-from pytorch_forecasting.metrics import SMAPE
+# --- START OF FIX ---
+# Import the correct loss function for quantile forecasting
+from pytorch_forecasting.metrics import QuantileLoss
+# --- END OF FIX ---
 
 # Set a seed for reproducibility
 pl.seed_everything(42)
@@ -18,13 +21,9 @@ pl.seed_everything(42)
 # Download Apple Inc. (AAPL) stock data from Yahoo Finance
 data = yf.download("AAPL", start="2018-01-01", end="2023-12-31")
 
-# --- START OF FIX ---
-# Flatten the MultiIndex columns returned by yfinance to be compatible with pytorch-forecasting.
-# This converts columns from ('Close', 'AAPL') to just 'Close'.
+# Flatten the MultiIndex columns
 if isinstance(data.columns, pd.MultiIndex):
     data.columns = data.columns.droplevel(1)
-# --- END OF FIX ---
-
 
 # Create a group identifier and a continuous time index
 data["ticker"] = "AAPL"
@@ -56,6 +55,7 @@ training = TimeSeriesDataSet(
     add_relative_time_idx=True,
     add_target_scales=True,
     add_encoder_length=True,
+    allow_missing_timesteps=True
 )
 
 # Create a validation set from the training data
@@ -63,7 +63,6 @@ validation = TimeSeriesDataSet.from_dataset(training, data, predict=True, stop_r
 
 # Create dataloaders for handling batching of the data
 batch_size = 128
-# Set num_workers to 0 on Windows or in certain notebook environments to avoid errors
 train_dataloader = training.to_dataloader(train=True, batch_size=batch_size, num_workers=0)
 val_dataloader = validation.to_dataloader(train=False, batch_size=batch_size * 10, num_workers=0)
 
@@ -90,7 +89,10 @@ tft = TemporalFusionTransformer.from_dataset(
     dropout=0.1,
     hidden_continuous_size=8,
     output_size=7,
-    loss=SMAPE(),
+    # --- START OF FIX ---
+    # Use the QuantileLoss, which is designed for probabilistic forecasting.
+    loss=QuantileLoss(),
+    # --- END OF FIX ---
     reduce_on_plateau_patience=4,
 )
 print(f"Number of parameters in network: {tft.size()/1e3:.1f}k")
