@@ -1,0 +1,17 @@
+# Core scientific computing libraries
+pandas
+numpy
+scikit-learn
+matplotlib
+
+# Data acquisition
+yfinance
+
+# Machine Learning & Deep Learning
+lightgbm
+torch
+lightning
+pytorch-forecasting
+
+# Config file parsing
+pyyaml
