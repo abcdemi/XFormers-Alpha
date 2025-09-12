@@ -18,18 +18,11 @@ class PatchTSTModel:
         self.scaler = StandardScaler()
         self.target_col_idx = -1
 
-    def _create_sequences(self, data: pd.DataFrame): # Expects a DataFrame now
-        X, y = [], []
-        
-        # --- START OF FIX ---
-        # Convert the DataFrame to a NumPy array BEFORE the loop for efficient slicing
+    def _create_sequences(self, data: pd.DataFrame):
         data_np = data.values
-        # --- END OF FIX ---
-
+        X, y = [], []
         for i in range(len(data_np) - self.window - self.horizon):
             X.append(data_np[i:(i + self.window)])
-            # The target is the 'close' price 'horizon' steps ahead
-            # Now this NumPy-style slicing will work correctly
             y.append(data_np[i + self.window : i + self.window + self.horizon, self.target_col_idx])
         return torch.tensor(np.array(X), dtype=torch.float32), torch.tensor(np.array(y), dtype=torch.float32)
 
@@ -38,22 +31,18 @@ class PatchTSTModel:
         
         train_df = X_train.copy()
         train_df['close'] = y_train
-        
         self.target_col_idx = train_df.columns.get_loc('close')
         
         scaled_data = self.scaler.fit_transform(train_df)
         scaled_df = pd.DataFrame(scaled_data, columns=train_df.columns)
-
         X_seq, y_seq = self._create_sequences(scaled_df)
 
         self.model = PyTorchPatchTST(
             context_length=self.window,
             prediction_length=self.horizon,
             num_channels=X_seq.shape[2],
-            patch_len=self.model_config['patch_len'],
-            stride=self.model_config['stride'],
-            model_dim=self.model_config['d_model'],
-            num_heads=self.model_config['n_heads'],
+            patch_len=self.model_config['patch_len'], stride=self.model_config['stride'],
+            model_dim=self.model_config['d_model'], num_heads=self.model_config['n_heads'],
             num_layers=self.model_config['depth']
         ).to(self.device)
 
@@ -68,7 +57,6 @@ class PatchTSTModel:
                 seqs, labels = seqs.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
                 y_pred = self.model(seqs)
-                # For horizon=1, label shape might be (B,), pred is (B,1), so we unsqueeze
                 if y_pred.shape != labels.shape and len(labels.shape) == 1:
                     labels = labels.unsqueeze(1)
                 loss = criterion(y_pred, labels)
@@ -78,17 +66,15 @@ class PatchTSTModel:
                 print(f'Epoch {epoch+1}/{self.train_config["epochs"]}, Loss: {loss.item():.5f}')
 
     def predict(self, X_test: pd.DataFrame, X_train: pd.DataFrame) -> np.ndarray:
-        print("--- Predicting with Multivariate PatchTSTModel (Rolling Window) ---")
+        print("--- Predicting with MULTIVARIATE PatchTSTModel (Rolling Window) ---")
         self.model.eval()
 
-        # Combine train and test features for a continuous history
-        # We need to add a dummy 'close' column to X_train for concat
-        X_train_with_dummy = X_train.copy()
-        X_train_with_dummy['close'] = 0 # This will be ignored by the scaler
+        # Combine historical and test features for a continuous data stream
+        # This is the correct way to handle the feature set for scaling
+        full_X_df = pd.concat([X_train, X_test], ignore_index=True)
         
-        full_X = pd.concat([X_train_with_dummy, X_test], ignore_index=True)
-        
-        scaled_full_X = self.scaler.transform(full_X)
+        # Scale the ENTIRE feature set using the scaler fitted during training
+        scaled_full_X = self.scaler.transform(full_X_df)
         
         predictions_scaled = []
         
@@ -103,44 +89,64 @@ class PatchTSTModel:
                 
                 prediction_horizon_scaled = self.model(input_tensor)
                 
+                # We only need the t+1 prediction for our strategy
                 first_step_prediction = prediction_horizon_scaled[0, 0].item()
                 predictions_scaled.append(first_step_prediction)
 
         predictions_scaled_np = np.array(predictions_scaled).reshape(-1, 1)
         
+        # Create a dummy array with the correct number of features for inverse scaling
         dummy_array = np.zeros((len(predictions_scaled_np), self.scaler.n_features_in_))
+        # Place our single prediction into the column that corresponds to the 'close' price
         dummy_array[:, self.target_col_idx] = predictions_scaled_np.flatten()
         
+        # Inverse transform the dummy array to get the predictions in the original price scale
         final_predictions = self.scaler.inverse_transform(dummy_array)[:, self.target_col_idx]
         
-        return final_predictions.flatten()
+        return final_predictions
 
 
 class PyTorchPatchTST(nn.Module):
-    # This sub-class remains unchanged
     def __init__(self, context_length, prediction_length, num_channels, patch_len, stride, model_dim, num_heads, num_layers):
         super().__init__()
         self.num_channels = num_channels
         self.prediction_length = prediction_length
-        self.model_dim = model_dim
         self.patching_layers = nn.ModuleList()
+        # Create a separate patching layer for each feature (channel)
         for _ in range(num_channels):
             self.patching_layers.append(PatchingLayer(context_length, patch_len, stride, model_dim))
         
-        self.head = nn.Linear(num_channels * ((context_length - patch_len) // stride + 1) * model_dim, prediction_length)
+        # This single Transformer encoder will process the concatenated patch embeddings
+        num_patches = (context_length - patch_len) // stride + 1
+        self.transformer_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=model_dim, nhead=num_heads, batch_first=True, dropout=0.1),
+            num_layers=num_layers
+        )
+        
+        # The head takes the flattened output of all channels and patches
+        head_in_features = num_channels * num_patches * model_dim
+        self.head = nn.Linear(head_in_features, prediction_length)
 
     def forward(self, x):
+        # x shape: (B, L, C)
         channel_outputs = []
         for i in range(self.num_channels):
+            # Each layer processes one channel: (B, L) -> (B, num_patches, model_dim)
             channel_out = self.patching_layers[i](x[:, :, i])
             channel_outputs.append(channel_out)
-        x_patched = torch.cat(channel_outputs, dim=1)
-        x_flat = x_patched.reshape(x_patched.size(0), -1) 
+        
+        # Concatenate along the patch dimension
+        x_patched = torch.cat(channel_outputs, dim=1) # Shape: (B, C * num_patches, model_dim)
+        
+        # The Transformer processes this long sequence of patches from all channels
+        transformer_output = self.transformer_encoder(x_patched)
+
+        # Flatten for the final head
+        x_flat = transformer_output.reshape(transformer_output.size(0), -1) 
         prediction = self.head(x_flat)
         return prediction
 
 class PatchingLayer(nn.Module):
-    # This sub-class remains unchanged
     def __init__(self, context_length, patch_len, stride, model_dim):
         super().__init__()
         self.patch_len = patch_len
@@ -150,6 +156,7 @@ class PatchingLayer(nn.Module):
         self.pos_encoder = nn.Parameter(torch.randn(1, num_patches, model_dim))
 
     def forward(self, x):
+        # x shape: (B, L)
         patches = x.unfold(dimension=1, size=self.patch_len, step=self.stride)
         embedding = self.embedding(patches)
         embedding = embedding + self.pos_encoder
