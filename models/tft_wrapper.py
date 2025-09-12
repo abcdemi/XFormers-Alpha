@@ -4,6 +4,7 @@ A wrapper for the Temporal Fusion Transformer (TFT) model from the
 pytorch-forecasting library to make it compatible with our project structure.
 """
 import pandas as pd
+import numpy as np
 import lightning.pytorch as pl
 from lightning.pytorch.callbacks import EarlyStopping
 from pytorch_forecasting import TimeSeriesDataSet, TemporalFusionTransformer
