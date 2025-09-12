@@ -1,0 +1,49 @@
+# ===================================================================
+# CONFIGURATION FOR A LIGHTGBM BASELINE EXPERIMENT
+# ===================================================================
+
+# --- General & Data Settings ---
+seed: 2025
+universe: 'GOOGL'
+window: 60           # Not used by this model, but kept for consistency
+horizon: 1
+freq: 'D'
+test_size: 0.2
+
+# --- Feature Engineering Settings ---
+features:
+  price:
+    - logret_1
+    - rsi_14
+    - sma_20
+    - bb_pct
+  volume:
+    - vol_scaled_20
+  calendar:
+    - dow
+    - month
+
+# --- Label Definition ---
+label:
+  type: 'regression'
+  target: 'close'
+
+# --- Model Hyperparameters ---
+model:
+  name: 'tree'       # Changed to 'tree' to select TreeBaseline
+  n_estimators: 200  # LGBM-specific parameters
+  learning_rate: 0.05
+  num_leaves: 31
+
+# --- Training Parameters ---
+train:
+  # Unused by LGBM, but framework expects them
+  batch_size: 32
+  lr: 0.001
+  epochs: 10
+  device: 'auto'
+
+# --- Backtesting Configuration ---
+backtest:
+  allocator: 'regression_long_only'
+  costs_bps: 2
