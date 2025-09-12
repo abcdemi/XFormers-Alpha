@@ -1,8 +1,4 @@
 # models/patchtst.py
-"""
-A PatchTST model, adapted for the project structure.
-Reference: https://arxiv.org/abs/2211.14730
-"""
 import numpy as np
 import torch
 import torch.nn as nn
@@ -34,12 +30,9 @@ class PatchTSTModel:
         X_seq, y_seq = self._create_sequences(scaled_target)
 
         self.model = PyTorchPatchTST(
-            context_length=self.window,
-            prediction_length=self.horizon,
-            patch_len=self.model_config['patch_len'],
-            stride=self.model_config['stride'],
-            model_dim=self.model_config['d_model'],
-            num_heads=self.model_config['n_heads'],
+            context_length=self.window, prediction_length=self.horizon,
+            patch_len=self.model_config['patch_len'], stride=self.model_config['stride'],
+            model_dim=self.model_config['d_model'], num_heads=self.model_config['n_heads'],
             num_layers=self.model_config['depth']
         ).to(self.device)
 
@@ -60,22 +53,56 @@ class PatchTSTModel:
             if (epoch + 1) % 5 == 0:
                 print(f'Epoch {epoch+1}/{self.train_config["epochs"]}, Loss: {loss.item():.5f}')
 
-    def predict(self, X_test: pd.DataFrame) -> np.ndarray:
-        print("--- Predicting with PatchTSTModel ---")
+    # --- START OF NEW IMPLEMENTATION ---
+    def predict(self, X_test: pd.DataFrame, y_train: pd.Series) -> np.ndarray:
+        """
+        Generates predictions using a rolling-window approach.
+        """
+        print("--- Predicting with PatchTSTModel (Rolling Window) ---")
         self.model.eval()
-        print("Warning: PatchTST prediction logic is simplified. Returning dummy predictions.")
-        return np.random.rand(len(X_test)) * 100
 
-# --- PyTorch Model Definition ---
+        # Combine the history (y_train) with the test period for continuous sequencing
+        # We use the 'close' price from the original test data for the true values
+        historical_data = y_train.values
+        
+        # Scale the entire history using the scaler fitted on training data
+        scaled_history = self.scaler.transform(historical_data.reshape(-1, 1))
+        
+        predictions_scaled = []
+        
+        with torch.no_grad():
+            for i in range(len(X_test)):
+                # The end of our input sequence is the i-th step into the test set
+                sequence_end_index = len(y_train) + i
+                # The start is 'window' days before that
+                sequence_start_index = sequence_end_index - self.window
+                
+                # We need to get the input sequence from the full original data, not X_test
+                input_sequence_scaled = scaled_history[sequence_start_index:sequence_end_index]
+                
+                # Convert to tensor and add batch/feature dimensions
+                input_tensor = torch.tensor(input_sequence_scaled, dtype=torch.float32).unsqueeze(0).to(self.device)
+                
+                # Get the prediction (horizon)
+                prediction_horizon_scaled = self.model(input_tensor)
+                
+                # We only care about the t+1 prediction
+                first_step_prediction = prediction_horizon_scaled[0, 0].item()
+                predictions_scaled.append(first_step_prediction)
+
+        # Inverse transform the collected predictions
+        predictions_scaled_np = np.array(predictions_scaled).reshape(-1, 1)
+        final_predictions = self.scaler.inverse_transform(predictions_scaled_np)
+        
+        return final_predictions.flatten()
+    # --- END OF NEW IMPLEMENTATION ---
+
+# ... [PyTorchPatchTST class remains unchanged] ...
 class PyTorchPatchTST(nn.Module):
     def __init__(self, context_length, prediction_length, patch_len, stride, model_dim, num_heads, num_layers):
         super().__init__()
-        
-        # --- START OF FIX ---
         self.patch_len = patch_len
         self.stride = stride
-        # --- END OF FIX ---
-        
         self.num_patches = (context_length - patch_len) // stride + 1
         self.embedding = nn.Linear(patch_len, model_dim)
         self.pos_encoder = nn.Parameter(torch.randn(1, self.num_patches, model_dim))
@@ -85,7 +112,6 @@ class PyTorchPatchTST(nn.Module):
 
     def forward(self, x):
         x_sq = x.squeeze(-1)
-        # This line will now work correctly
         patches = x_sq.unfold(dimension=1, size=self.patch_len, step=self.stride)
         embedding = self.embedding(patches)
         embedding = embedding + self.pos_encoder
