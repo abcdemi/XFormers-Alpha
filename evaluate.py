@@ -20,18 +20,17 @@ def main():
     data_dict = artifacts['data_dict']
     config = artifacts['config']
 
+    X_train = data_dict['X_train'] # Get the training features
+    y_train = data_dict['y_train'] # Get the training target
     X_test = data_dict['X_test']
     y_test = data_dict['y_test']
     df_test_original = data_dict['df_test_original']
     
     # --- START OF CHANGE ---
-    # For sequence models, we need to pass the training history to the predict method
-    y_train = data_dict['y_train']
-    
-    # Check if the model has the new signature before passing extra args
+    # Check if the model has the new multivariate signature
     if config['model']['name'] in ['patchtst', 'informer', 'lstm']:
-        # This will need to be adapted for LSTM as well if you implement its rolling prediction
-        predictions = model.predict(X_test, y_train) 
+        # Pass the full feature history needed for rolling predictions
+        predictions = model.predict(X_test, X_train) 
     else:
         predictions = model.predict(X_test)
     # --- END OF CHANGE ---
