@@ -20,20 +20,16 @@ def main():
     data_dict = artifacts['data_dict']
     config = artifacts['config']
 
-    X_train = data_dict['X_train'] # Get the training features
-    y_train = data_dict['y_train'] # Get the training target
+    X_train = data_dict['X_train']
     X_test = data_dict['X_test']
     y_test = data_dict['y_test']
     df_test_original = data_dict['df_test_original']
     
-    # --- START OF CHANGE ---
-    # Check if the model has the new multivariate signature
+    # Check if the model needs the historical features for prediction
     if config['model']['name'] in ['patchtst', 'informer', 'lstm']:
-        # Pass the full feature history needed for rolling predictions
         predictions = model.predict(X_test, X_train) 
     else:
         predictions = model.predict(X_test)
-    # --- END OF CHANGE ---
     
     backtest_results = run_backtest(predictions, df_test_original, config['backtest'])
     
