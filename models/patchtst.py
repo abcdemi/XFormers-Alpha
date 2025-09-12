@@ -23,18 +23,14 @@ class PatchTSTModel:
 
     def _create_sequences(self, data):
         X, y = [], []
-        for i in range(len(data) - self.window - self.horizon + 1):
+        for i in range(len(data) - self.window - self.horizon):
             X.append(data[i:(i + self.window)])
             y.append(data[i + self.window : i + self.window + self.horizon])
-        # X shape: (N, window, 1), y shape: (N, horizon, 1)
         return torch.tensor(np.array(X), dtype=torch.float32), torch.tensor(np.array(y), dtype=torch.float32)
 
     def train(self, X_train: pd.DataFrame, y_train: pd.Series):
         print(f"--- Training PatchTSTModel on {self.device} ---")
-
-        # PatchTST, like other sequence models, works best on the scaled target series
         scaled_target = self.scaler.fit_transform(y_train.values.reshape(-1, 1))
-
         X_seq, y_seq = self._create_sequences(scaled_target)
 
         self.model = PyTorchPatchTST(
@@ -58,7 +54,6 @@ class PatchTSTModel:
                 seqs, labels = seqs.to(self.device), labels.to(self.device)
                 optimizer.zero_grad()
                 y_pred = self.model(seqs)
-                # Ensure labels are the correct shape for the loss function
                 loss = criterion(y_pred, labels.squeeze(-1))
                 loss.backward()
                 optimizer.step()
@@ -68,18 +63,6 @@ class PatchTSTModel:
     def predict(self, X_test: pd.DataFrame) -> np.ndarray:
         print("--- Predicting with PatchTSTModel ---")
         self.model.eval()
-
-        # For a simple train/test split, we create test sequences from the test target data
-        # Note: This implies y_test is known. For true forecasting, you'd roll the window.
-        # This simplification is for comparing models in a backtest framework.
-        
-        # We need a placeholder y_test series to match the structure
-        y_test_placeholder = pd.Series(np.zeros(len(X_test)))
-        scaled_target = self.scaler.transform(y_test_placeholder.values.reshape(-1, 1))
-        
-        # In a real scenario, you'd use the last part of the training data
-        # to form the first input sequence for the test set.
-        # For simplicity here, we'll return a placeholder.
         print("Warning: PatchTST prediction logic is simplified. Returning dummy predictions.")
         return np.random.rand(len(X_test)) * 100
 
@@ -87,6 +70,12 @@ class PatchTSTModel:
 class PyTorchPatchTST(nn.Module):
     def __init__(self, context_length, prediction_length, patch_len, stride, model_dim, num_heads, num_layers):
         super().__init__()
+        
+        # --- START OF FIX ---
+        self.patch_len = patch_len
+        self.stride = stride
+        # --- END OF FIX ---
+        
         self.num_patches = (context_length - patch_len) // stride + 1
         self.embedding = nn.Linear(patch_len, model_dim)
         self.pos_encoder = nn.Parameter(torch.randn(1, self.num_patches, model_dim))
@@ -95,8 +84,8 @@ class PyTorchPatchTST(nn.Module):
         self.head = nn.Linear(model_dim * self.num_patches, prediction_length)
 
     def forward(self, x):
-        # x shape: (B, L, F=1)
-        x_sq = x.squeeze(-1)  # Shape (B, L)
+        x_sq = x.squeeze(-1)
+        # This line will now work correctly
         patches = x_sq.unfold(dimension=1, size=self.patch_len, step=self.stride)
         embedding = self.embedding(patches)
         embedding = embedding + self.pos_encoder
