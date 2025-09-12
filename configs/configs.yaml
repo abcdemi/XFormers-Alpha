@@ -6,7 +6,7 @@
 seed: 2025
 universe: 'GOOGL'    # Ticker symbol for yfinance
 window: 96           # Lookback window (L in PatchTST)
-horizon: 32          # Prediction horizon (O in PatchTST)
+horizon: 1          # Prediction horizon (O in PatchTST)
 freq: 'D'            # Daily frequency
 test_size: 0.2       # Proportion of data for the test set
 
