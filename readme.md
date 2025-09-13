@@ -45,7 +45,7 @@ The strategy demonstrated a significant ability to generate alpha, achieving a w
 ## Project Structure
 
 ```
-/financial_forecasting/
+/XFormers-Alpha/
 |
 ├── configs/              # YAML files to define experiments
 ├── data/                 # Data loading and feature engineering pipeline
