@@ -24,7 +24,7 @@ This framework was built to investigate the following:
 
 After a multi-stage research process involving feature engineering, model selection, and strategy refinement, the final `PatchTST` model combined with an adaptive backtesting strategy yielded the following performance on the 2023 test set for GOOGL stock.
 
-![PatchTST Strategy Performance](PatchTST-strategy.png)
+![PatchTST Strategy Performance](results/PatchTST-strategy.png)
 
 ### Performance Metrics
 
