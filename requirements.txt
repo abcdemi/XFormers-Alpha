@@ -1,0 +1,22 @@
+# Core Data Science & ML Libraries
+pandas>=1.5.0
+numpy>=1.23.0
+scikit-learn>=1.2.0
+matplotlib>=3.6.0
+lightgbm>=3.3.0
+
+# Deep Learning Frameworks
+torch>=2.0.0
+lightning>=2.0.0
+pytorch-forecasting>=1.0.0
+
+# Data Acquisition
+yfinance>=0.2.0
+
+# Utilities
+PyYAML>=6.0
+optuna>=3.1.0  # For optional hyperparameter tuning
+
+# Note: Depending on your system and if you have a GPU, you may need to
+# install a specific version of torch that is compatible with your CUDA toolkit.
+# It is often best to install torch first via the official instructions on the PyTorch website.
