@@ -1,19 +1,21 @@
 # ===================================================================
-# CONFIGURATION FOR A LIGHTGBM BASELINE EXPERIMENT
+# CONFIGURATION FOR A LIGHTGBM (TREE) BASELINE EXPERIMENT
 # ===================================================================
 
 # --- General & Data Settings ---
 seed: 2025
 universe: 'GOOGL'
-window: 60           # Not used by this model, but kept for consistency
-horizon: 1
+window: 60           # Not used directly by LGBM, but good for context
+horizon: 1           # Predicting t+1 forward return
 freq: 'D'
-test_size: 0.2
+# test_size is not used because we use pre-split data, but we keep it for reference
 
 # --- Feature Engineering Settings ---
+# We can use the exact same feature set as the PatchTST model for a direct comparison
 features:
   price:
     - logret_1
+    - logret_5
     - rsi_14
     - sma_20
     - bb_pct
@@ -26,24 +28,34 @@ features:
 # --- Label Definition ---
 label:
   type: 'regression'
-  target: 'close'
+  # The dataloader is now hardcoded to create 'logret_fwd_1',
+  # so 'target' is descriptive here.
+  target: 'logret_fwd_1'
 
 # --- Model Hyperparameters ---
+# This is the key section we are changing
 model:
-  name: 'tree'       # Changed to 'tree' to select TreeBaseline
-  n_estimators: 200  # LGBM-specific parameters
+  name: 'tree'       # This tells train.py to load the TreeBaseline class
+  
+  # --- LightGBM-specific parameters ---
+  n_estimators: 500
   learning_rate: 0.05
-  num_leaves: 31
+  num_leaves: 40
+  max_depth: 8
+  reg_alpha: 0.1     # L1 regularization
+  reg_lambda: 0.1    # L2 regularization
+  colsample_bytree: 0.8
 
 # --- Training Parameters ---
+# These are not used by the scikit-learn interface of LightGBM,
+# but we keep the section for consistency.
 train:
-  # Unused by LGBM, but framework expects them
-  batch_size: 32
-  lr: 0.001
-  epochs: 10
-  device: 'auto'
+  batch_size: 0
+  lr: 0.0
+  epochs: 0
+  device: 'cpu'
 
 # --- Backtesting Configuration ---
 backtest:
-  allocator: 'regression_long_only'
+  allocator: 'directional_return' # This should match the new logic
   costs_bps: 2
