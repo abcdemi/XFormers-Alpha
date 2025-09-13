@@ -1,0 +1,63 @@
+# ===================================================================
+# CONFIGURATION FOR A PATCHTST MODEL EXPERIMENT
+# ===================================================================
+
+# --- General & Data Settings ---
+seed: 2025
+universe: 'GOOGL'    # Ticker symbol for yfinance
+window: 96           # Lookback window (L in PatchTST)
+horizon: 1          # Prediction horizon (O in PatchTST)
+freq: 'D'            # Daily frequency
+test_size: 0.2       # Proportion of data for the test set
+
+# --- Feature Engineering Settings ---
+# Define which feature families to generate.
+# Each key corresponds to a function in data/features.py
+features:
+  price:
+    - logret_1       # Log return over 1 day
+    - logret_5       # Log return over 5 days
+    - rsi_14         # 14-day Relative Strength Index
+    - sma_20         # 20-day Simple Moving Average
+    - bb_pct         # Bollinger Band percentage
+  volume:
+    - vol_scaled_20  # Volume scaled by its 20-day moving average
+  calendar:
+    - dow            # Day of week
+    - month          # Month of year
+
+# --- Label Definition ---
+# Defines the target variable for the model to predict.
+label:
+  type: 'regression'
+  target: 'close'    # We will predict the raw closing price
+
+# --- Model Hyperparameters ---
+model:
+  name: 'patchtst'   # Must match a model class in the models/ directory
+  d_model: 128
+  n_heads: 8
+  depth: 3
+  patch_len: 16
+  stride: 8
+  dropout: 0.1
+
+# --- Training Parameters ---
+train:
+  batch_size: 32
+  lr: 0.0005
+  epochs: 25
+  # The metric to monitor for stopping training early
+  early_stop_metric: 'val_loss'
+  device: 'auto'     # 'cpu', 'cuda', or 'auto'
+
+# --- Backtesting Configuration ---
+# These parameters will be used by evaluate.py
+backtest:
+  # How to translate model predictions into portfolio weights
+  # 'regression_long_only' means we treat the prediction as a signal strength to go long.
+  allocator: 'regression_long_only'
+  
+  # Transaction costs and penalties
+  turnover_penalty: 0.0  # No penalty in this simple backtest
+  costs_bps: 2           # 2 basis points (0.02%) per trade
