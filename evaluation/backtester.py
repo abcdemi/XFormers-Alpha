@@ -13,7 +13,7 @@ def run_backtest(predictions: np.ndarray, df_test_original: pd.DataFrame, config
         
     df_test['prediction'] = predictions
 
-    # --- START OF DEFINITIVE FIX: Adaptive, Bias-Correcting Allocator ---
+    # --- Adaptive, Bias-Correcting Allocator ---
     # The model has a strong ranking ability (IC) but a systematic negative bias.
     # We will trade on the signal relative to its own recent history.
     
@@ -24,7 +24,7 @@ def run_backtest(predictions: np.ndarray, df_test_original: pd.DataFrame, config
     # This removes the systematic bias and trades on the relative signal.
     signal = (df_test['prediction'] > prediction_moving_avg).astype(int)
     weights = signal
-    # --- END OF DEFINITIVE FIX ---
+
 
     df_test['weight'] = weights
     
