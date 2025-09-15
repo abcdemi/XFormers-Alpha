@@ -45,7 +45,7 @@ train:
 # --- NEW: Hyperparameter Tuning Configuration ---
 tune:
   enabled: True
-  n_trials: 50  # Number of different combinations for Optuna to try
+  n_trials: 50
   search_space:
     hidden_size:
       type: 'int'
@@ -57,8 +57,9 @@ tune:
       high: 3
     lr:
       type: 'float'
-      low: 1e-4
-      high: 1e-2
+      # --- FIX: Changed from strings to floating point numbers ---
+      low: 1.0e-4
+      high: 1.0e-2
       log: True
 
 # --- Backtesting Configuration ---
