@@ -45,7 +45,7 @@ train:
 # --- NEW: Hyperparameter Tuning Configuration ---
 tune:
   enabled: True
-  n_trials: 50
+  n_trials: 10
   search_space:
     hidden_size:
       type: 'int'
