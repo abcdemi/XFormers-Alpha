@@ -7,6 +7,7 @@ import random
 import numpy as np
 import torch
 import optuna
+from copy import deepcopy # Import the deepcopy function
 
 from data.dataloader import load_and_prepare_data
 from models.baselines import LinearBaseline, TreeBaseline, LSTMBaseline
@@ -32,39 +33,30 @@ def main():
     data_dict = load_and_prepare_data(config)
     X_train, y_train = data_dict['X_train'], data_dict['y_train']
     
-    # Get all model classes
     models = { 'linear': LinearBaseline, 'tree': TreeBaseline, 'lstm': LSTMBaseline, 'informer': InformerModel, 'patchtst': PatchTSTModel, 'tft': TFTModel }
 
-    # --- START OF FIX: More robust objective function ---
     if config.get('tune', {}).get('enabled', False):
         print("\n--- Starting Hyperparameter Tuning with Optuna ---")
         
         def objective(trial):
-            # Create a mutable copy of the configs for this trial
-            trial_config = config.copy()
-            trial_model_config = trial_config['model'].copy()
-            trial_train_config = trial_config['train'].copy()
-
-            # Iterate through the search space and suggest parameters
-            for param, settings in config['tune']['search_space'].items():
-                param_type = settings.pop('type') # Get and remove the 'type'
+            # --- START OF FIX ---
+            # Use deepcopy to create a completely independent copy of the config for each trial
+            trial_config = deepcopy(config)
+            # --- END OF FIX ---
+            
+            # Suggest new hyperparameters for this trial
+            for param, settings in trial_config['tune']['search_space'].items():
+                param_type = settings.pop('type')
                 
-                # Determine which part of the config the param belongs to
-                if param in trial_model_config:
-                    target_config = trial_model_config
-                elif param in trial_train_config:
-                    target_config = trial_train_config
-                else:
-                    raise ValueError(f"Parameter '{param}' not found in model or train config.")
+                target_config = None
+                if param in trial_config['model']: target_config = trial_config['model']
+                elif param in trial_config['train']: target_config = trial_config['train']
+                else: raise ValueError(f"Parameter '{param}' not found in model or train config.")
 
                 if param_type == 'int':
                     target_config[param] = trial.suggest_int(param, **settings)
                 elif param_type == 'float':
                     target_config[param] = trial.suggest_float(param, **settings)
-            
-            # Update the main config copy for this trial
-            trial_config['model'] = trial_model_config
-            trial_config['train'] = trial_train_config
             
             val_split_idx = int(len(X_train) * 0.8)
             X_train_fold, X_val_fold = X_train.iloc[:val_split_idx], X_train.iloc[val_split_idx:]
@@ -74,11 +66,14 @@ def main():
             model = model_class(trial_config)
             model.train(X_train_fold, y_train_fold)
             
-            # The LSTM predict function needs X_train_fold for context
+            # Pass correct historical context for prediction
             predictions = model.predict(X_val_fold, X_train_fold)
             
             from evaluation.metrics import calculate_information_coefficient
-            ic = calculate_information_coefficient(predictions, y_val_fold.values)
+            # Ensure predictions and actuals are aligned for IC calculation
+            offset = len(y_val_fold) - len(predictions)
+            aligned_y_val = y_val_fold.iloc[offset:]
+            ic = calculate_information_coefficient(predictions, aligned_y_val.values)
             return ic
 
         study = optuna.create_study(direction='maximize')
@@ -93,8 +88,6 @@ def main():
              if param in config['model']: config['model'][param] = value
              if param in config['train']: config['train'][param] = value
 
-    # --- END OF FIX ---
-    
     # --- Final Model Training ---
     model_name = config['model']['name'].lower()
     print(f"\n--- Training Final Model: {model_name} ---")
