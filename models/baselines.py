@@ -1,37 +1,30 @@
+# ... (Keep LinearBaseline and TreeBaseline classes as they are) ...
 import pandas as pd
 import numpy as np
 import lightgbm as lgb
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import StandardScaler
 import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 import re
 
-class LinearBaseline:
+class LinearBaseline: # ... (no changes)
     def __init__(self, config: dict):
-        self.model = LinearRegression()
-        self.config = config
+        self.model = LinearRegression(); self.config = config
     def train(self, X_train: pd.DataFrame, y_train: pd.Series):
-        print("--- Training Linear Baseline ---")
-        self.model.fit(X_train, y_train)
+        print("--- Training Linear Baseline ---"); self.model.fit(X_train, y_train)
     def predict(self, X_test: pd.DataFrame) -> np.ndarray:
-        print("--- Predicting with Linear Baseline ---")
-        return self.model.predict(X_test)
+        print("--- Predicting with Linear Baseline ---"); return self.model.predict(X_test)
 
-class TreeBaseline:
+class TreeBaseline: # ... (no changes)
     def __init__(self, config: dict):
-        model_params = config['model']
-        # Pop the 'name' key as it's not a valid LGBM parameter
-        model_params.pop('name', None)
-        self.model = lgb.LGBMRegressor(random_state=config['seed'], **model_params)
-        self.config = config
+        model_params = config['model']; model_params.pop('name', None)
+        self.model = lgb.LGBMRegressor(random_state=config['seed'], **model_params); self.config = config
     def train(self, X_train: pd.DataFrame, y_train: pd.Series):
-        print("--- Training Tree Baseline (LightGBM) ---")
-        self.model.fit(X_train, y_train)
+        print("--- Training Tree Baseline (LightGBM) ---"); self.model.fit(X_train, y_train)
     def predict(self, X_test: pd.DataFrame) -> np.ndarray:
-        print("--- Predicting with Tree Baseline ---")
-        return self.model.predict(X_test)
+        print("--- Predicting with Tree Baseline ---"); return self.model.predict(X_test)
 
 
 # --- START OF REPLACEMENT ---
@@ -45,21 +38,21 @@ class LSTMBaseline:
         self.window = config['window']
         self.device = torch.device("cuda" if torch.cuda.is_available() and self.train_config.get('device') == 'cuda' else "cpu")
         self.model = None
-        self.scaler = StandardScaler() # Use StandardScaler for consistency
+        self.scaler = StandardScaler()
         self.target_col_idx = -1
 
     def _create_sequences(self, data: np.ndarray):
         X, y = [], []
         for i in range(len(data) - self.window):
             X.append(data[i:(i + self.window)])
-            y.append(data[i + self.window, self.target_col_idx]) # Target is the single next step
+            y.append(data[i + self.window, self.target_col_idx])
         return torch.tensor(np.array(X), dtype=torch.float32), torch.tensor(np.array(y).reshape(-1, 1), dtype=torch.float32)
 
     def train(self, X_train: pd.DataFrame, y_train: pd.Series):
         print(f"--- Training Multivariate LSTM Baseline on {self.device} ---")
         
         train_df = X_train.copy()
-        train_df['target'] = y_train # Use 'target' for the label column name
+        train_df['target'] = y_train
         self.target_col_idx = train_df.columns.get_loc('target')
         
         scaled_data = self.scaler.fit_transform(train_df)
@@ -95,10 +88,13 @@ class LSTMBaseline:
         print("--- Predicting with Multivariate LSTM (Rolling Window) ---")
         self.model.eval()
 
-        # Combine historical and test features for a continuous data stream
         full_X_df = pd.concat([X_train, X_test], ignore_index=True)
         
-        # Scale the ENTIRE feature set using the scaler fitted during training
+        # --- START OF FIX ---
+        # Add a dummy 'target' column to match the structure used during training
+        full_X_df['target'] = 0
+        # --- END OF FIX ---
+        
         scaled_full_X = self.scaler.transform(full_X_df)
         
         predictions_scaled = []
@@ -118,7 +114,6 @@ class LSTMBaseline:
 
         predictions_scaled_np = np.array(predictions_scaled).reshape(-1, 1)
         
-        # Create a dummy array for inverse scaling
         dummy_array = np.zeros((len(predictions_scaled_np), self.scaler.n_features_in_))
         dummy_array[:, self.target_col_idx] = predictions_scaled_np.flatten()
         
@@ -127,7 +122,7 @@ class LSTMBaseline:
         return final_predictions
 
 class PyTorchLSTM(nn.Module):
-    """The PyTorch LSTM model architecture."""
+    # ... (unchanged) ...
     def __init__(self, input_size, hidden_layer_size=50, num_layers=2, output_size=1):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_layer_size, num_layers, batch_first=True)
