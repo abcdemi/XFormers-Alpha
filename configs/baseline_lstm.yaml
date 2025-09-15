@@ -1,0 +1,50 @@
+# ===================================================================
+# CONFIGURATION FOR AN LSTM BASELINE EXPERIMENT
+# ===================================================================
+
+# --- General & Data Settings ---
+seed: 2025
+universe: 'GOOGL'
+window: 60           # Lookback window for sequences (CRITICAL for LSTM)
+horizon: 1           # Predicting t+1 forward return
+freq: 'D'
+
+# --- Feature Engineering Settings ---
+# We will use the same rich feature set for a direct comparison
+features:
+  price:
+    - logret_1
+    - logret_5
+    - rsi_14
+    - sma_20
+    - bb_pct
+  volume:
+    - vol_scaled_20
+  calendar:
+    - dow
+    - month
+
+# --- Label Definition ---
+label:
+  type: 'regression'
+  target: 'logret_fwd_1'
+
+# --- Model Hyperparameters ---
+# This section is now specific to our LSTMBaseline class
+model:
+  name: 'lstm'       # This selects the LSTMBaseline class
+  hidden_size: 50    # Number of neurons in the LSTM hidden layers
+  depth: 2           # Number of stacked LSTM layers
+
+# --- Training Parameters ---
+# These are now critical for the PyTorch training loop
+train:
+  batch_size: 32
+  lr: 0.001          # Learning rate for the Adam optimizer
+  epochs: 25
+  device: 'auto'     # Will use 'cuda' if available, otherwise 'cpu'
+
+# --- Backtesting Configuration ---
+backtest:
+  allocator: 'directional_return' # Use our best-performing adaptive allocator
+  costs_bps: 2
