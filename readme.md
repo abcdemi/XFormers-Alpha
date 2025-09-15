@@ -92,7 +92,7 @@ pip install -r requirements.txt
 
 #### 2. Get the Data
 
-Download the [Google Stock (2010-2023) dataset from Kaggle](https://www.kaggle.com/datasets/alirezajavid1999/google-stock-2010-2023). Unzip the files and place `Google_Stock_Train (2010-2022).csv` and `Google_Stock_Test (2023).csv` into the `local_data/` directory.
+Download the [Google Stock (2010-2023) dataset from Kaggle](https://www.kaggle.com/datasets/alirezajavid1999/google-stock-10-2023). Unzip the files and place `Google_Stock_Train (2010-2022).csv` and `Google_Stock_Test (2023).csv` into the `local_data/` directory.
 
 #### 3. Run an Experiment
 
@@ -118,6 +118,20 @@ python evaluate.py --artifacts results/your_model_artifacts.pkl
 
 ## Methodology
 
--   **Features:** Both models were trained on a rich feature set including price/volume indicators (log returns, RSI, Bollinger Bands), calendar features (day of week), and market context.
--   **Target:** Models were trained to predict the `t+1` forward log return.
+### Backtest and Evaluation
+
+-   **Prediction:** The models use a **rolling-window** approach on the test set to generate `t+1` forward return predictions for each day.
 -   **Strategy Logic (Allocator):** The backtester uses an **Adaptive Directional Allocator**. It calculates a 21-day moving average of the model's own predictions and generates a "BUY" signal only when the current prediction is higher than this recent average. This makes the strategy robust to a model's systematic biases. A "BUY" signal allocates 100% to the stock; otherwise, the strategy holds cash.
+-   **Metrics:** Performance is measured by the Information Coefficient and the annualized Sharpe Ratio.
+
+### Key Performance Metrics
+
+**Annualized Sharpe Ratio**
+-   **What it is:** The most common metric for measuring risk-adjusted return. It calculates how much excess return a strategy generates for each unit of risk it takes on (where risk is measured by the volatility of the returns).
+-   **What it tells us:** A higher Sharpe Ratio is better. It indicates a more efficient strategy that produces smoother, more consistent returns.
+-   **Interpretation:** A Sharpe Ratio > 1.0 is considered good, > 2.0 is excellent, and > 3.0 is world-class. Our strategy's 2.25 is an exceptional result.
+
+**Information Coefficient (IC)**
+-   **What it is:** A measure of a model's raw predictive skill. It calculates the Spearman rank correlation between the model's predictions and the actual outcomes.
+-   **What it tells us:** The IC answers the question: "When the model makes a high prediction, does the stock actually tend to go up more?" It focuses on the correctness of the *ranking* of predictions, not their absolute values.
+-   **Interpretation:** The IC ranges from -1.0 (perfectly wrong) to +1.0 (perfectly right). In quantitative finance, a consistent IC > 0.05 is often considered a valuable signal. Our IC of 0.13 demonstrates a significant predictive edge.
