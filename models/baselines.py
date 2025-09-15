@@ -53,7 +53,11 @@ class LSTMBaseline:
         
         train_df = X_train.copy()
         train_df['target'] = y_train
+        
+        # --- START OF FIX ---
+        # Save the target column index to the class instance so it's available during prediction
         self.target_col_idx = train_df.columns.get_loc('target')
+        # --- END OF FIX ---
         
         scaled_data = self.scaler.fit_transform(train_df)
         X_seq, y_seq = self._create_sequences(scaled_data)
@@ -89,11 +93,7 @@ class LSTMBaseline:
         self.model.eval()
 
         full_X_df = pd.concat([X_train, X_test], ignore_index=True)
-        
-        # --- START OF FIX ---
-        # Add a dummy 'target' column to match the structure used during training
-        full_X_df['target'] = 0
-        # --- END OF FIX ---
+        full_X_df['target'] = 0 # Add dummy target column
         
         scaled_full_X = self.scaler.transform(full_X_df)
         
@@ -115,6 +115,7 @@ class LSTMBaseline:
         predictions_scaled_np = np.array(predictions_scaled).reshape(-1, 1)
         
         dummy_array = np.zeros((len(predictions_scaled_np), self.scaler.n_features_in_))
+        # This line will now work correctly
         dummy_array[:, self.target_col_idx] = predictions_scaled_np.flatten()
         
         final_predictions = self.scaler.inverse_transform(dummy_array)[:, self.target_col_idx]
@@ -127,7 +128,7 @@ class PyTorchLSTM(nn.Module):
         super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_layer_size, num_layers, batch_first=True)
         self.linear = nn.Linear(hidden_layer_size, output_size)
-    def forward(self, input_seq):
+    def forward(self, input_.se.q):
         lstm_out, _ = self.lstm(input_seq)
         predictions = self.linear(lstm_out[:, -1, :])
         return predictions
